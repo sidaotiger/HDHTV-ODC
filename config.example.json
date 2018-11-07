@@ -1,0 +1,14 @@
+{
+    "HotelID": 1,
+    "MySQL": {
+        "Host": "localhost",
+        "Port": 3306,
+        "User": "username",
+        "Password": "password",
+        "Database": "database"
+    },
+    "Upload": {
+        "URL": "https://example.com",
+        "FormName": "file"
+    }
+}
