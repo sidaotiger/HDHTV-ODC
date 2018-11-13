@@ -35,15 +35,19 @@ type config struct {
 
 type operateData struct {
 	HotelID int
-	Date    string
+	Time    string
 	Data    [][]string
 }
 
+const (
+	dumpTimeFile = "next-dump-time"
+)
+
 var (
-	cfg   config // 配置数据
-	lerr  = log.New(os.Stderr, "[错误] ", log.LstdFlags)
-	linf  = log.New(os.Stdout, "[信息] ", log.LstdFlags)
-	doing bool
+	cfg     config // 配置数据
+	lerr    = log.New(os.Stderr, "[错误] ", log.LstdFlags)
+	linf    = log.New(os.Stdout, "[信息] ", log.LstdFlags)
+	dumping bool
 )
 
 func main() {
@@ -53,44 +57,41 @@ func main() {
 		lerr.Fatalln(err)
 	}
 	linf.Println("程序启动")
-	tkch := time.Tick(time.Minute * 5)
+	tkch := time.Tick(time.Minute)
 	for now := range tkch {
-		if !doing {
-			go do(now)
+		if !dumping {
+			go dump(now)
 		}
 	}
 }
 
-func do(now time.Time) {
-	doing = true
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	for i := 0; i < 10; i++ {
-		nextDate, err := readNextDate()
-		if err != nil {
-			lerr.Println(err)
-			break
-		}
-		if !nextDate.Before(today) {
-			break
-		}
-		dateStr := nextDate.Format("20060102")
-		linf.Println("收集数据: " + dateStr)
-		data, err := getOperateData(dateStr)
-		if err != nil {
-			lerr.Println("收集数据出错: " + err.Error())
-			break
-		}
-		if err = writeData(data); err != nil {
-			lerr.Println("生成数据出错: " + err.Error())
-			break
-		}
-		if err = writeNextDate(nextDate.Add(time.Hour * 24)); err != nil {
-			lerr.Println("更新nextdate出错: " + err.Error())
-			break
+func dump(now time.Time) {
+	dumping = true
+	curHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
+	nextTime, err := getNextDumpTime()
+	if err != nil {
+		lerr.Println(err)
+	} else {
+		for nextTime.Before(curHour) {
+			linf.Println("收集数据: " + nextTime.Format("2006-01-02 15:04:05"))
+			data, err := getOperationData(nextTime)
+			if err != nil {
+				lerr.Println("收集数据失败: " + err.Error())
+				break
+			}
+			if err = writeData(data); err != nil {
+				lerr.Println("数据写入失败: " + err.Error())
+				break
+			}
+			nextTime = nextTime.Add(time.Hour)
+			if err = setNextDumpTime(nextTime); err != nil {
+				lerr.Println("更新时间失败: " + err.Error())
+				break
+			}
 		}
 	}
 	uploadAllFiles()
-	doing = false
+	dumping = false
 }
 
 func uploadAllFiles() {
@@ -115,41 +116,41 @@ func parseConfig(filename string) (config, error) {
 	var cfg config
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return cfg, errors.New("读取配置文件出错: " + err.Error())
+		return cfg, errors.New("读取配置文件失败: " + err.Error())
 	}
 	if err = json.Unmarshal(data, &cfg); err != nil {
-		return cfg, errors.New("解析配置文件出错: " + err.Error())
+		return cfg, errors.New("解析配置文件失败: " + err.Error())
 	}
 	return cfg, nil
 }
 
-// 从nextdate文件读取下次收集的日期
-func readNextDate() (time.Time, error) {
-	const filename = "nextdate"
+// 读取下次收集的时间
+func getNextDumpTime() (time.Time, error) {
 	var t time.Time
-	data, err := ioutil.ReadFile(filename)
+	data, err := ioutil.ReadFile(dumpTimeFile)
 	if err != nil {
-		return t, errors.New("读取" + filename + "失败: " + err.Error())
+		return t, errors.New("读取时间失败: " + err.Error())
 	}
-	if t, err = time.Parse("20060102", string(data)); err != nil {
-		return t, errors.New("解析" + filename + "失败: 格式不正确")
+	if t, err = time.Parse("2006010215", string(data)); err != nil {
+		return t, errors.New("解析时间失败: " + dumpTimeFile + "格式不正确")
 	}
 	return t, nil
 }
 
 // 将下次收集日期写入文件
-func writeNextDate(t time.Time) error {
-	const filename = "nextdate"
-	return ioutil.WriteFile(filename, []byte(t.Format("20060102")), 0666)
+func setNextDumpTime(t time.Time) error {
+	return ioutil.WriteFile(dumpTimeFile, []byte(t.Format("2006010215")), 0666)
 }
 
-// 读取指定日期的operate数据
-func getOperateData(date string) (*operateData, error) {
+// 读取指定时间的数据
+func getOperationData(t time.Time) (*operateData, error) {
+	timeStr := t.Format("20060102 15")
 	data := operateData{
 		HotelID: cfg.HotelID,
-		Date:    date,
+		Time:    t.Format("2006010215"),
 		Data:    [][]string{},
 	}
+	// 数据库连接字符串
 	conStr := fmt.Sprintf("%s:%s@tcp(%s)/%s", cfg.MySQL.User, cfg.MySQL.Password, cfg.MySQL.Host, cfg.MySQL.Database)
 	db, err := sql.Open("mysql", conStr)
 	if err != nil {
@@ -159,7 +160,8 @@ func getOperateData(date string) (*operateData, error) {
 	if err := db.Ping(); err != nil {
 		return nil, errors.New("连接数据库失败: " + err.Error())
 	}
-	sql := fmt.Sprintf("SELECT function_name,time,status,stb_ip FROM operate WHERE time BETWEEN '%[1]s 000000' AND '%[1]s 235959' AND del_flag='0' ORDER BY operate_id", date)
+	sql := fmt.Sprintf(`SELECT function_name,time,status,stb_ip FROM operate 
+		WHERE time BETWEEN '%[1]s0000' AND '%[1]s5959' AND del_flag='0' ORDER BY operate_id`, timeStr)
 	rows, err := db.Query(sql)
 	if err != nil {
 		return nil, errors.New("执行数据库查询失败: " + err.Error())
@@ -180,10 +182,10 @@ func writeData(data *operateData) error {
 	if err != nil {
 		return err
 	}
-	if d, err = GzipEncode(d); err != nil {
+	/* if d, err = GzipEncode(d); err != nil {
 		return errors.New("压缩数据失败: " + err.Error())
-	}
-	filename := fmt.Sprintf("%d@%s.gzip", cfg.HotelID, data.Date)
+	} */
+	filename := fmt.Sprintf("%d@%s.json", cfg.HotelID, data.Time)
 	os.Mkdir("data", 0755)
 	return ioutil.WriteFile("data/"+filename, d, 0644)
 }

@@ -1,6 +1,6 @@
 data/
 config.json
-nextdate
+next-dump-time
 
 # binary file
 odc*
