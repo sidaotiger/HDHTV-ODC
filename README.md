@@ -16,9 +16,9 @@ make windows
 ```
 cp config.example.json config.json
 ```
-2. 修改config.json文件的内容
-3. 创建nextdate文件
+2. 修改 config.json 文件的内容
+3. 创建 next-dump-time 文件
 ```
-date +%Y%m%d > nextdate
+date +%Y%m%d%H > next-dump-time
 ```
 4. 运行程序
