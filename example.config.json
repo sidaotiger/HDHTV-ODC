@@ -1,0 +1,17 @@
+{
+    "hotel_code": "hotel-code",
+    "mysql": {
+        "host": "localhost",
+        "port": 3306,
+        "username": "username",
+        "password": "password",
+        "database": "database"
+    },
+    "api": {
+        "base_url": "https://example.com/api/",
+        "token": "api_token"
+    },
+    "max_packet_length": 1000,
+    "max_sleep_second": 10,
+    "begin_time": "20180101 000000"
+}
